@@ -9,6 +9,9 @@ jobs:
  check-and-build:
    runs-on: ubuntu-latest
    steps:
+     - name: Checkout own repository
+       uses: actions/checkout@v4
+
      - name: Check for new Maple tag
        id: check-tag
        run: |
@@ -30,13 +33,10 @@ jobs:
            echo "No new version to build."
          fi
 
-     - name: Checkout repository
+     - name: Clone Maple repository
        if: steps.check-tag.outputs.NEW_TAG == 'true'
-       uses: actions/checkout@v4
-       with:
-         repository: subframe7536/maple-font
-         ref: variable
-         fetch-depth: 0
+       run: |
+         git clone --depth 1 --branch ${{ steps.check-tag.outputs.LATEST_TAG }} https://github.com/subframe7536/maple-font.git
 
      - name: Setup Python
        if: steps.check-tag.outputs.NEW_TAG == 'true'
@@ -44,14 +44,16 @@ jobs:
        with:
          python-version: '3.12'
          cache: 'pip'
-         cache-dependency-path: './requirements.txt'
+         cache-dependency-path: './maple-font/requirements.txt'
 
      - name: Install dependencies
        if: steps.check-tag.outputs.NEW_TAG == 'true'
+       working-directory: maple-font
        run: pip install -r requirements.txt
 
      - name: Remove operator ligatures (++, +++, ==) from feature files
        if: steps.check-tag.outputs.NEW_TAG == 'true'
+       working-directory: maple-font
        run: |
          for file in source/features/{regular,italic}.fea; do
              sed -i \
@@ -63,6 +65,7 @@ jobs:
 
      - name: Build custom font
        if: steps.check-tag.outputs.NEW_TAG == 'true'
+       working-directory: maple-font
        run: python build.py --archive --feat cv01,cv02,cv03,cv34,cv35,cv36,zero --apply-fea-file --no-cn --no-nerd-font
 
      - name: Create archive
@@ -70,19 +73,24 @@ jobs:
        if: steps.check-tag.outputs.NEW_TAG == 'true'
        run: |
          VERSION=${{ steps.check-tag.outputs.LATEST_TAG }}
-         (cd fonts && zip -8 -r ../MapleCustom_${VERSION}.zip TTF-AutoHint TTF)
+         (cd maple-font/fonts && zip -8 -r ../../MapleCustom_${VERSION}.zip TTF-AutoHint TTF)
          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
 
      - name: Manage archives
        if: steps.check-tag.outputs.NEW_TAG == 'true'
        run: |
          mkdir -p archive
-         mv MapleCustom_*.zip archive/
-         mv archive/MapleCustom_${{ steps.latest-archive.outputs.VERSION }}.zip ./
+         if [ -f "MapleCustom_${{ steps.latest-archive.outputs.VERSION }}.zip" ]; then
+           mv MapleCustom_${{ steps.latest-archive.outputs.VERSION }}.zip archive/
+           cd archive
+           ls -t MapleCustom_*.zip | tail -n +10 | xargs rm -f 2>/dev/null
+           cd ..
+           mv archive/MapleCustom_${{ steps.latest-archive.outputs.VERSION }}.zip ./
+         fi
 
-         cd archive
-         ls -t MapleCustom_*.zip | tail -n +10 | xargs rm -f 2>/dev/null
-         cd ..
+     - name: Cleanup
+       if: steps.check-tag.outputs.NEW_TAG == 'true'
+       run: rm -rf maple-font
 
      - name: Commit and push changes
        if: steps.check-tag.outputs.NEW_TAG == 'true'
