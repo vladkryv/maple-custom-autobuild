@@ -1,0 +1,94 @@
+name: Build Custom Maple Font
+
+on:
+ schedule:
+   - cron: '0 */6 * * *'
+ workflow_dispatch:
+
+jobs:
+ check-and-build:
+   runs-on: ubuntu-latest
+   steps:
+     - name: Check for new Maple tag
+       id: check-tag
+       run: |
+         LATEST_TAG=$(curl -s https://api.github.com/repos/subframe7536/maple-font/tags | jq -r '.[0].name')
+         echo "Latest Maple tag: $LATEST_TAG"
+         LATEST_VERSION=$LATEST_TAG
+
+         CURRENT_ARCHIVE=$(curl -s https://api.github.com/repos/${{ github.repository }}/contents/ | jq -r '.[] | select(.name | test("MapleCustom_.*\\.zip")) | .name' | head -n 1)
+         if [ -n "$CURRENT_ARCHIVE" ]; then
+           CURRENT_VERSION=$(echo $CURRENT_ARCHIVE | sed -E 's/MapleCustom_(.*)\.zip/\1/')
+         else
+           CURRENT_VERSION=""
+         fi
+
+         if [ -z "$CURRENT_VERSION" ] || [ "$LATEST_VERSION" != "$CURRENT_VERSION" ]; then
+           echo "NEW_TAG=true" >> $GITHUB_OUTPUT
+           echo "LATEST_TAG=$LATEST_TAG" >> $GITHUB_OUTPUT
+         else
+           echo "No new version to build."
+         fi
+
+     - name: Checkout repository
+       if: steps.check-tag.outputs.NEW_TAG == 'true'
+       uses: actions/checkout@v4
+       with:
+         repository: subframe7536/maple-font
+         ref: variable
+         fetch-depth: 0
+
+     - name: Setup Python
+       if: steps.check-tag.outputs.NEW_TAG == 'true'
+       uses: actions/setup-python@v5
+       with:
+         python-version: '3.12'
+         cache: 'pip'
+         cache-dependency-path: './requirements.txt'
+
+     - name: Install dependencies
+       if: steps.check-tag.outputs.NEW_TAG == 'true'
+       run: pip install -r requirements.txt
+
+     - name: Remove operator ligatures (++, +++, ==) from feature files
+       if: steps.check-tag.outputs.NEW_TAG == 'true'
+       run: |
+         for file in source/features/{regular,italic}.fea; do
+             sed -i \
+                 -e '/^[[:space:]]*# ++$/,/^[[:space:]]*} plus_plus.liga;$/d' \
+                 -e '/^[[:space:]]*# +++$/,/^[[:space:]]*} plus_plus_plus.liga;$/d' \
+                 -e '/^[[:space:]]*# ==$/,/^[[:space:]]*} equal_equal.liga;$/d' \
+                 "$file"
+         done
+
+     - name: Build custom font
+       if: steps.check-tag.outputs.NEW_TAG == 'true'
+       run: python build.py --archive --feat cv01,cv02,cv03,cv34,cv35,cv36,zero --apply-fea-file --no-cn --no-nerd-font
+
+     - name: Create archive
+       id: latest-archive
+       if: steps.check-tag.outputs.NEW_TAG == 'true'
+       run: |
+         VERSION=${{ steps.check-tag.outputs.LATEST_TAG }}
+         (cd fonts && zip -8 -r ../MapleCustom_${VERSION}.zip TTF-AutoHint TTF)
+         echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+
+     - name: Manage archives
+       if: steps.check-tag.outputs.NEW_TAG == 'true'
+       run: |
+         mkdir -p archive
+         mv MapleCustom_*.zip archive/
+         mv archive/MapleCustom_${{ steps.latest-archive.outputs.VERSION }}.zip ./
+
+         cd archive
+         ls -t MapleCustom_*.zip | tail -n +10 | xargs rm -f 2>/dev/null
+         cd ..
+
+     - name: Commit and push changes
+       if: steps.check-tag.outputs.NEW_TAG == 'true'
+       run: |
+         git config --local user.email "action@github.com"
+         git config --local user.name "Github Actions"
+         git add .
+         git commit -m "Add new Maple custom build ${{ steps.check-tag.outputs.LATEST_TAG }}"
+         git push
