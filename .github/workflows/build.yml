@@ -79,14 +79,13 @@ jobs:
      - name: Manage archives
        if: steps.check-tag.outputs.NEW_TAG == 'true'
        run: |
-         mkdir -p archive
-         if [ -f "MapleCustom_${{ steps.latest-archive.outputs.VERSION }}.zip" ]; then
-           mv MapleCustom_${{ steps.latest-archive.outputs.VERSION }}.zip archive/
-           cd archive
-           ls -t MapleCustom_*.zip | tail -n +10 | xargs rm -f 2>/dev/null
-           cd ..
-           mv archive/MapleCustom_${{ steps.latest-archive.outputs.VERSION }}.zip ./
-         fi
+         mkdir -p archive       
+         mv MapleCustom_*.zip archive/
+         mv archive/MapleCustom_${{ steps.latest-archive.outputs.VERSION }}.zip ./
+
+         cd archive
+         ls -t MapleCustom_*.zip | tail -n +10 | xargs rm -f 2>/dev/null
+         cd ..
 
      - name: Cleanup
        if: steps.check-tag.outputs.NEW_TAG == 'true'
